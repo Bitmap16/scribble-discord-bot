@@ -47,5 +47,10 @@
     "level": "INFO",
     "log_file": "logs/scribble.log",
     "log_ai_calls": true
+  },
+  "debug": {
+    "raw_output": false,
+    "show_json_responses": false,
+    "verbose_actions": false
   }
 }

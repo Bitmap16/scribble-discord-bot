@@ -32,6 +32,8 @@
     "name": "Scribble",
     "server_name": "Tiny Ninos",
     "role": "chancellor",
+    "status_message": "over Tiny Ninos as chancellor! uwu",
+    "status_type": "watching",
     "max_memory_entries": 100,
     "memory_cleanup_threshold": 150
   },
@@ -51,6 +53,7 @@
   "debug": {
     "raw_output": false,
     "show_json_responses": false,
-    "verbose_actions": false
+    "verbose_actions": false,
+    "log_to_terminal": true
   }
 }

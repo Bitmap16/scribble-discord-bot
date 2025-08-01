@@ -77,11 +77,25 @@ class ScribbleBot(commands.Bot):
         self.logger.info(f'{self.user} has connected to Discord!')
         self.logger.info(f'Bot is in {len(self.guilds)} guilds')
         
-        # Set status
+        # Set configurable status
+        status_message = self.config.get('character.status_message', 'over Tiny Ninos as chancellor! uwu')
+        status_type = self.config.get('character.status_type', 'watching')
+        
+        # Map status type string to Discord ActivityType
+        activity_types = {
+            'playing': discord.ActivityType.playing,
+            'streaming': discord.ActivityType.streaming,
+            'listening': discord.ActivityType.listening,
+            'watching': discord.ActivityType.watching,
+            'competing': discord.ActivityType.competing
+        }
+        
+        activity_type = activity_types.get(status_type.lower(), discord.ActivityType.watching)
+        
         await self.change_presence(
             activity=discord.Activity(
-                type=discord.ActivityType.watching,
-                name="over Tiny Ninos as chancellor! uwu"
+                type=activity_type,
+                name=status_message
             )
         )
         
@@ -161,6 +175,17 @@ class ScribbleBot(commands.Bot):
             await message.channel.send("*confused scribble noises* uwu")
             return
             
+        # Log raw response for debugging
+        self.logger.info(f"Raw AI Response: {json.dumps(response, indent=2)}")
+        
+        # Also print to terminal if enabled
+        if self.config.get('debug.log_to_terminal', True):
+            print(f"\n🤖 RAW AI RESPONSE:")
+            print(f"📝 Message: {response.get('message', 'None')}")
+            print(f"⚡ Action: {response.get('action', 'none')}")
+            print(f"📋 Full JSON: {json.dumps(response, indent=2)}")
+            print("-" * 50)
+        
         # Send message response with pretty formatting
         if response.get('message'):
             await self.send_formatted_response(message.channel, response)
@@ -312,6 +337,19 @@ class ScribbleBot(commands.Bot):
             status = "enabled" if not current else "disabled"
             await ctx.send(f"🔧 Debug info in responses {status}! uwu")
             
+        @self.command(name='terminal')
+        async def toggle_terminal_logging(ctx):
+            """Toggle terminal logging of raw responses"""
+            if not self.is_admin(ctx.author):
+                await ctx.send("*shakes head* Only admins can use debug commands, sowwy! uwu")
+                return
+                
+            current = self.config.get('debug.log_to_terminal', True)
+            self.config.set('debug.log_to_terminal', not current)
+            
+            status = "enabled" if not current else "disabled"
+            await ctx.send(f"🖥️ Terminal logging {status}! {'Raw responses will show in console!' if not current else 'Console output disabled!'} uwu")
+            
         @self.command(name='status')
         async def show_debug_status(ctx):
             """Show current debug settings"""
@@ -322,6 +360,7 @@ class ScribbleBot(commands.Bot):
             raw_output = self.config.get('debug.raw_output', False)
             show_json = self.config.get('debug.show_json_responses', False)
             verbose_actions = self.config.get('debug.verbose_actions', False)
+            terminal_logging = self.config.get('debug.log_to_terminal', True)
             
             embed = discord.Embed(
                 title="🔧 Scribble Debug Status",
@@ -330,9 +369,10 @@ class ScribbleBot(commands.Bot):
             
             embed.add_field(name="Raw Output", value="✅ Enabled" if raw_output else "❌ Disabled", inline=True)
             embed.add_field(name="Debug Info", value="✅ Enabled" if show_json else "❌ Disabled", inline=True)
+            embed.add_field(name="Terminal Logging", value="✅ Enabled" if terminal_logging else "❌ Disabled", inline=True)
             embed.add_field(name="Verbose Actions", value="✅ Enabled" if verbose_actions else "❌ Disabled", inline=True)
             
-            embed.set_footer(text="Use !scribble raw or !scribble debug to toggle • uwu")
+            embed.set_footer(text="Commands: !scribble raw, debug, terminal, status • uwu")
             
             await ctx.send(embed=embed)
             

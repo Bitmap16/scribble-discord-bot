@@ -52,8 +52,6 @@
   },
   "debug": {
     "raw_output": false,
-    "show_json_responses": false,
-    "verbose_actions": false,
     "log_to_terminal": true
   }
 }

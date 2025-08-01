@@ -186,9 +186,17 @@ class ScribbleBot(commands.Bot):
             print(f"📋 Full JSON: {json.dumps(response, indent=2)}")
             print("-" * 50)
         
-        # Send message response with pretty formatting
+        # Send message response (raw JSON or plain text)
         if response.get('message'):
-            await self.send_formatted_response(message.channel, response)
+            raw_output = self.config.get('debug.raw_output', False)
+            
+            if raw_output:
+                # Send raw JSON for debugging
+                json_str = json.dumps(response, indent=2)
+                await message.channel.send(f"```json\n{json_str}\n```")
+            else:
+                # Send plain text message (like original)
+                await message.channel.send(response['message'])
             
         # Execute action if specified
         if response.get('action') and response['action'] != 'none':
@@ -258,55 +266,7 @@ class ScribbleBot(commands.Bot):
         except Exception as e:
             self.logger.error(f"Error updating memories: {e}")
             
-    async def send_formatted_response(self, channel, response):
-        """Send a formatted response based on debug settings"""
-        raw_output = self.config.get('debug.raw_output', False)
-        show_json = self.config.get('debug.show_json_responses', False)
-        
-        if raw_output:
-            # Send raw JSON for debugging
-            json_str = json.dumps(response, indent=2)
-            await channel.send(f"```json\n{json_str}\n```")
-        else:
-            # Send pretty formatted message
-            message = response.get('message', '')
-            action = response.get('action', 'none')
-            
-            # Create a nice embed for the response
-            embed = discord.Embed(
-                description=message,
-                color=0xFFB6C1  # Light pink
-            )
-            
-            # Add Scribble's avatar/icon
-            embed.set_author(
-                name="Scribble 🐾",
-                icon_url="https://cdn.discordapp.com/emojis/1234567890123456789.png"  # Placeholder
-            )
-            
-            # Add action info if there's an action
-            if action != 'none':
-                embed.add_field(
-                    name="📋 Action",
-                    value=f"`{action}`",
-                    inline=False
-                )
-                
-            # Add debug info if enabled
-            if show_json:
-                embed.add_field(
-                    name="🔧 Debug Info",
-                    value=f"```json\n{json.dumps(response, indent=2)}\n```",
-                    inline=False
-                )
-                
-            embed.set_footer(text="Chancellor of Tiny Ninos • uwu")
-            
-            try:
-                await channel.send(embed=embed)
-            except discord.HTTPException:
-                # Fallback to plain text if embed fails
-                await channel.send(message)
+
                 
     def add_admin_commands(self):
         """Add admin commands for debugging and configuration"""
@@ -322,21 +282,9 @@ class ScribbleBot(commands.Bot):
             self.config.set('debug.raw_output', not current)
             
             status = "enabled" if not current else "disabled"
-            await ctx.send(f"🔧 Raw output {status}! {'JSON mode activated!' if not current else 'Pretty mode activated!'} uwu")
+            await ctx.send(f"🔧 Raw output {status}! {'JSON mode activated!' if not current else 'Plain text mode activated!'} uwu")
             
-        @self.command(name='debug')
-        async def toggle_debug_info(ctx):
-            """Toggle debug info in pretty responses"""
-            if not self.is_admin(ctx.author):
-                await ctx.send("*shakes head* Only admins can use debug commands, sowwy! uwu")
-                return
-                
-            current = self.config.get('debug.show_json_responses', False)
-            self.config.set('debug.show_json_responses', not current)
-            
-            status = "enabled" if not current else "disabled"
-            await ctx.send(f"🔧 Debug info in responses {status}! uwu")
-            
+
         @self.command(name='terminal')
         async def toggle_terminal_logging(ctx):
             """Toggle terminal logging of raw responses"""
@@ -358,8 +306,6 @@ class ScribbleBot(commands.Bot):
                 return
                 
             raw_output = self.config.get('debug.raw_output', False)
-            show_json = self.config.get('debug.show_json_responses', False)
-            verbose_actions = self.config.get('debug.verbose_actions', False)
             terminal_logging = self.config.get('debug.log_to_terminal', True)
             
             embed = discord.Embed(
@@ -368,11 +314,9 @@ class ScribbleBot(commands.Bot):
             )
             
             embed.add_field(name="Raw Output", value="✅ Enabled" if raw_output else "❌ Disabled", inline=True)
-            embed.add_field(name="Debug Info", value="✅ Enabled" if show_json else "❌ Disabled", inline=True)
             embed.add_field(name="Terminal Logging", value="✅ Enabled" if terminal_logging else "❌ Disabled", inline=True)
-            embed.add_field(name="Verbose Actions", value="✅ Enabled" if verbose_actions else "❌ Disabled", inline=True)
             
-            embed.set_footer(text="Commands: !scribble raw, debug, terminal, status • uwu")
+            embed.set_footer(text="Commands: !scribble raw, terminal, status • uwu")
             
             await ctx.send(embed=embed)
             

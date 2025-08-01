@@ -1,0 +1,51 @@
+{
+  "discord": {
+    "bot_token": "YOUR_DISCORD_BOT_TOKEN_HERE",
+    "guild_id": null,
+    "activation_threshold": 0.85,
+    "message_history_count": 20,
+    "command_cooldown_seconds": 3,
+    "max_actions_per_hour": 10
+  },
+  "openai": {
+    "api_key": "YOUR_OPENAI_API_KEY_HERE",
+    "main_model": "gpt-4o",
+    "profiler_model": "gpt-3.5-turbo",
+    "memory_model": "gpt-3.5-turbo",
+    "max_tokens": {
+      "main": 500,
+      "profiler": 200,
+      "memory": 300
+    },
+    "temperature": {
+      "main": 0.8,
+      "profiler": 0.3,
+      "memory": 0.5
+    }
+  },
+  "google_images": {
+    "api_key": "YOUR_GOOGLE_API_KEY_HERE",
+    "search_engine_id": "YOUR_SEARCH_ENGINE_ID_HERE",
+    "max_results": 10
+  },
+  "character": {
+    "name": "Scribble",
+    "server_name": "Tiny Ninos",
+    "role": "chancellor",
+    "max_memory_entries": 100,
+    "memory_cleanup_threshold": 150
+  },
+  "safety": {
+    "admin_user_ids": [],
+    "protected_user_ids": [],
+    "max_timeout_minutes": 60,
+    "enable_bans": true,
+    "enable_timeouts": true,
+    "enable_nicknames": true
+  },
+  "logging": {
+    "level": "INFO",
+    "log_file": "logs/scribble.log",
+    "log_ai_calls": true
+  }
+}

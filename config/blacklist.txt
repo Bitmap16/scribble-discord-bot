@@ -1,0 +1,9 @@
+# Channels where Scribble should not respond
+# Add channel names or IDs, one per line
+# Lines starting with # are comments
+
+audit-log
+mod-log
+bot-commands
+admin-only
+staff-chat

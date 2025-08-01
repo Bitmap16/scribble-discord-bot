@@ -56,21 +56,41 @@ class ScribbleBot(commands.Bot):
         
     def setup_logging(self):
         """Setup logging configuration"""
-        log_level = getattr(logging, self.config.get('logging.level', 'INFO'))
+        log_level = getattr(logging, self.config.get('logging.level', 'WARNING'))  # Default to WARNING instead of INFO
         log_file = self.config.get('logging.log_file', 'logs/scribble.log')
         
         # Create logs directory if it doesn't exist
         os.makedirs(os.path.dirname(log_file), exist_ok=True)
         
-        logging.basicConfig(
-            level=log_level,
-            format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-            handlers=[
-                logging.FileHandler(log_file),
-                logging.StreamHandler()
-            ]
-        )
+        # Configure root logger
+        logging.basicConfig(level=log_level)
+        
+        # Set up file handler with detailed logging
+        file_handler = logging.FileHandler(log_file)
+        file_handler.setLevel(log_level)
+        file_formatter = logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+        file_handler.setFormatter(file_formatter)
+        
+        # Set up console handler with minimal logging
+        console_handler = logging.StreamHandler()
+        console_handler.setLevel(log_level)
+        console_formatter = logging.Formatter('%(message)s')
+        console_handler.setFormatter(console_formatter)
+        
+        # Configure the root logger
+        root_logger = logging.getLogger()
+        root_logger.setLevel(log_level)
+        root_logger.handlers = []  # Remove any existing handlers
+        root_logger.addHandler(file_handler)
+        root_logger.addHandler(console_handler)
+        
+        # Set specific log levels for noisy loggers
+        logging.getLogger('discord').setLevel(logging.WARNING)
+        logging.getLogger('httpx').setLevel(logging.WARNING)
+        
+        # Create our bot logger
         self.logger = logging.getLogger('ScribbleBot')
+        self.logger.setLevel(log_level)
         
     async def on_ready(self):
         """Called when bot is ready"""

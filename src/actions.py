@@ -285,15 +285,10 @@ class ActionHandler:
         try:
             image_url = await self.search_image(search_query)
             if image_url:
-                embed = discord.Embed(
-                    title=f"🖼️ Image: {search_query}",
-                    color=0xFFB6C1  # Light pink
-                )
-                embed.set_image(url=image_url)
-                embed.set_footer(text="Found by Scribble! uwu")
-                
-                await channel.send(embed=embed)
+                # Send the raw image URL directly
+                await channel.send(image_url)
             else:
+                # Only send a message if no image is found
                 await channel.send(f"*sadly* I couldn't find any images for '{search_query}'... sowwy! uwu")
                 
         except Exception as e:
@@ -316,7 +311,7 @@ class ActionHandler:
             'q': query,
             'searchType': 'image',
             'num': self.config.get('google_images.max_results', 10),
-            'safe': 'moderate'
+            'safe': 'active'  # Must be either 'active' or 'off'
         }
         
         try:

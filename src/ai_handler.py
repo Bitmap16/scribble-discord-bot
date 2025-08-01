@@ -76,11 +76,24 @@ Remember to respond as Scribble and format your response as JSON with 'message' 
             
             content = response.choices[0].message.content.strip()
             
-            # Try to parse JSON response
+            # Try to parse JSON response, handling markdown code blocks
             try:
+                # First try direct JSON parsing
                 return json.loads(content)
             except json.JSONDecodeError:
-                # If not valid JSON, treat as plain message
+                # Check if it's wrapped in markdown code blocks
+                if '```json' in content and '```' in content:
+                    # Extract JSON from code blocks
+                    start = content.find('```json') + 7
+                    end = content.rfind('```')
+                    if start < end:
+                        json_content = content[start:end].strip()
+                        try:
+                            return json.loads(json_content)
+                        except json.JSONDecodeError:
+                            pass
+                
+                # If still can't parse, treat as plain message
                 return {"message": content, "action": "none"}
                 
         except Exception as e:

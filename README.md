@@ -6,6 +6,7 @@ A naive, innocent furry Discord bot powered by AI that serves as the "chancellor
 
 - **Natural AI Conversations**: Powered by GPT-4o with a unique naive, furry personality
 - **Smart Activation**: Responds when mentioned with 85% fuzzy name matching
+- **Wake Word System**: Say the wake word to start a conversation that lasts until timeout
 - **User Profiling**: Automatically builds profiles of server members using AI
 - **Memory System**: Maintains persistent memories of interactions
 - **Moderation Actions**: Timeout, ban, nickname changes, and DMs
@@ -87,6 +88,28 @@ Scribble can perform these actions when mentioned:
 - `vcjoin [channel_name] [minutes]` - Join a voice channel
 - `image [description]` - Search and post an image
 
+## 🔔 Wake Word System
+
+Scribble now supports a wake word system for more natural conversations:
+
+1. **Say the wake word** (default: "scribble") to start a conversation
+2. **Keep chatting** - Scribble will respond to all messages in the channel
+3. **Automatic timeout** - After 10 minutes of inactivity, the conversation ends
+4. **Say the wake word again** to restart the conversation
+
+### Configuration
+- `wake_word`: The word to activate conversation mode (default: "scribble")
+- `conversation_timeout_minutes`: Minutes of inactivity before timeout (default: 10)
+- `enable_wake_word_mode`: Enable/disable the wake word system (default: true)
+
+### Admin Commands
+- `!scribble wakeword` - Show wake word system status
+- `!scribble wakeword_toggle` - Enable/disable wake word mode
+- `!scribble wakeword_set [word]` - Change the wake word
+- `!scribble timeout_set [minutes]` - Change conversation timeout
+- `!scribble fix_memories` - Fix and validate memory data
+- `!scribble clear_memories` - Reset all memories to default
+
 ## 📁 Project Structure
 
 ```
@@ -117,6 +140,13 @@ scribble/
 - `command_cooldown_seconds`: Cooldown between responses (3)
 - `max_actions_per_hour`: Action rate limit (10)
 
+### Response Settings
+- `name_closeness_threshold`: Fuzzy name matching threshold (85%)
+- `random_response_chance`: Chance to respond randomly (100%)
+- `wake_word`: Word to activate conversation mode ("scribble")
+- `conversation_timeout_minutes`: Minutes before conversation ends (10)
+- `enable_wake_word_mode`: Enable wake word system (true)
+
 ### AI Settings
 - `main_model`: Primary conversation model (gpt-4o)
 - `profiler_model`: User profiling model (gpt-3.5-turbo)
@@ -137,8 +167,11 @@ Edit `config/prompt.txt` to customize Scribble's personality, speech patterns, a
 
 ### Memory Management
 - Memories are automatically managed and cleaned up
+- Robust error handling with fallback mechanisms
+- Automatic validation and corruption repair
 - Manual editing possible in `data/memories.json`
 - Configurable memory limits in settings
+- Admin commands for memory maintenance
 
 ### User Profiles
 - Automatically generated based on message analysis
@@ -178,6 +211,8 @@ Edit `config/prompt.txt` to customize Scribble's personality, speech patterns, a
    - Review character prompt
 
 4. **Memory/profile issues**
+   - Use `!scribble fix_memories` to repair corrupted data
+   - Use `!scribble clear_memories` to reset if needed
    - Check file permissions in `data/` folder
    - Verify JSON file format
    - Check disk space

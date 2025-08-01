@@ -4,14 +4,15 @@ Handles Discord actions like timeouts, bans, nicknames, DMs, voice channels, and
 """
 
 import os
-import logging
-import asyncio
 import aiohttp
-import random
-import json
-from typing import Optional, Dict, Any
-from datetime import datetime, timedelta
+import asyncio
 import discord
+import json
+import logging
+import os
+import random
+from typing import Optional, Dict, List, Any
+from datetime import datetime, timedelta
 from fuzzywuzzy import fuzz
 
 class ActionHandler:
@@ -280,48 +281,83 @@ class ActionHandler:
             await channel.send(f"*confused* I couldn't join the voice channel: {e}... uwu")
             
     async def handle_image_search(self, args, channel):
-        """Handle image search and posting"""
+        """Handle image search and posting of multiple images"""
         if not args:
             await channel.send("*confused* What kind of image should I look for? uwu")
             return
             
         search_query = " ".join(args).strip('"\'')
+        max_images = self.config.get('google_images.max_images_to_post', 5)  # Default max 5 images
+        
+        # Randomly select how many images to post (1 to max_images)
+        num_images = random.randint(1, max_images)
         
         try:
-            image_url = await self.search_image(search_query)
-            if image_url:
-                # Send the raw image URL directly
-                await channel.send(image_url)
-            else:
-                # Only send a message if no image is found
+            # Get multiple random image URLs
+            image_urls = await self.search_images(search_query, count=num_images)
+            
+            if not image_urls:
                 await channel.send(f"*sadly* I couldn't find any images for '{search_query}'... sowwy! uwu")
+                return
+                
+            # Post each image in a separate message
+            for url in image_urls:
+                try:
+                    await channel.send(url)
+                    # Small delay between posts to avoid rate limiting
+                    await asyncio.sleep(0.5)
+                except Exception as e:
+                    self.logger.error(f"Error posting image: {e}")
+                    continue
                 
         except Exception as e:
-            self.logger.error(f"Error searching for image: {e}")
+            self.logger.error(f"Error searching for images: {e}")
             await channel.send("*confused* Something went wrong while looking for images... uwu")
             
-    async def search_image(self, query: str) -> Optional[str]:
-        """Search for an image using Google Custom Search API"""
+    async def search_images(self, query: str, count: int = 1) -> List[str]:
+        """Search for multiple images using Google Custom Search API, restricted to safe sites if configured
+        
+        Args:
+            query: The search query string
+            count: Number of unique images to return (up to max_results)
+            
+        Returns:
+            List of image URLs, or empty list if no results or error
+        """
         api_key = os.getenv('GOOGLE_API_KEY') or self.config.get('google_images.api_key')
         search_engine_id = os.getenv('GOOGLE_SEARCH_ENGINE_ID') or self.config.get('google_images.search_engine_id')
         
         if not api_key or not search_engine_id or api_key == "YOUR_GOOGLE_API_KEY_HERE":
             self.logger.warning("Google Images API not configured")
-            return None
+            return []
             
-        # Add random 4-digit number to make results more diverse
-        random_suffix = random.randint(1000, 9999)
-        search_query = f"{query} {random_suffix}"
-            
+        # Get safe sites from config if available
+        safe_sites = self.config.get('google_images.safe_sites', [])
+        max_results = self.config.get('google_images.max_results', 10)
+        
+        # Get safe search setting from config (default: 'active')
+        safe_search = self.config.get('google_images.safe_search', 'active')
+        
+        # Build the search query
         url = "https://www.googleapis.com/customsearch/v1"
         params = {
             'key': api_key,
             'cx': search_engine_id,
-            'q': search_query,
+            'q': query,  # The base search query
             'searchType': 'image',
-            'num': self.config.get('google_images.max_results', 10),
-            'safe': 'active'  # Must be either 'active' or 'off'
+            'num': min(max_results, 10),  # Google API max is 10 per request
+            'safe': safe_search,  # 'active' or 'off' from config
+            'imgSize': 'large',  # Prefer larger images
+            'imgType': 'photo',  # Prefer photos over icons/clipart
+            'rights': 'cc_publicdomain,cc_attribute,cc_sharealike'  # Try to get more permissive content
         }
+        
+        # If we have safe sites, add them as site search parameters
+        if safe_sites:
+            # Google's API allows multiple site parameters, which acts as an OR condition
+            for site in safe_sites:
+                params[f'siteSearch'] = site
+                params['siteSearchFilter'] = 'i'  # 'i' means include these sites only
         
         try:
             async with aiohttp.ClientSession() as session:
@@ -330,12 +366,13 @@ class ActionHandler:
                         data = await response.json()
                         items = data.get('items', [])
                         if items:
-                            # Return first result
-                            return items[0]['link']
+                            # Randomly select up to 'count' unique images
+                            selected_items = random.sample(items, min(len(items), count))
+                            return [item['link'] for item in selected_items]
         except Exception as e:
             self.logger.error(f"Google Images API error: {e}")
             
-        return None
+        return []
         
     async def find_member(self, guild: discord.Guild, username: str) -> Optional[discord.Member]:
         """Find a member by username, display name, or mention"""

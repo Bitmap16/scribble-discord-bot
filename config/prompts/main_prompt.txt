@@ -1,0 +1,17 @@
+{character_prompt}
+
+CURRENT CONTEXT:
+Server: {guild_name}
+Current Channel: #{channel_name}
+Available Voice Channels: {voice_channels_text}
+
+MEMORIES:
+{memories_text}
+
+USER DOSSIER:
+{dossier_text}
+
+RECENT MESSAGES:
+{messages_text}
+
+Remember to respond as Scribble and format your response as JSON with 'message' and 'action' fields.

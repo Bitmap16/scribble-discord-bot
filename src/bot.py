@@ -10,6 +10,7 @@ import asyncio
 import json
 import logging
 import os
+import random
 from datetime import datetime, timedelta
 from fuzzywuzzy import fuzz
 from dotenv import load_dotenv
@@ -51,6 +52,12 @@ class ScribbleBot(commands.Bot):
         self.last_response = {}
         self.action_count = {}
         
+        # Wake word conversation tracking
+        self.active_conversations = {}  # {channel_id: {'last_activity': datetime, 'active': bool}}
+        self.wake_word = self.config.get('response.wake_word', 'scribble').lower()
+        self.conversation_timeout = self.config.get('response.conversation_timeout_minutes', 10)
+        self.wake_word_mode_enabled = self.config.get('response.enable_wake_word_mode', True)
+        
         # Setup logging
         self.setup_logging()
         
@@ -85,8 +92,9 @@ class ScribbleBot(commands.Bot):
         root_logger.addHandler(console_handler)
         
         # Set specific log levels for noisy loggers
-        logging.getLogger('discord').setLevel(logging.WARNING)
-        logging.getLogger('httpx').setLevel(logging.WARNING)
+        logging.getLogger('discord').setLevel(logging.INFO)  # Increased from WARNING to INFO
+        logging.getLogger('httpx').setLevel(logging.INFO)    # Increased from WARNING to INFO
+        logging.getLogger('openai').setLevel(logging.DEBUG)  # Add OpenAI debug logging
         
         # Create our bot logger
         self.logger = logging.getLogger('ScribbleBot')
@@ -125,12 +133,43 @@ class ScribbleBot(commands.Bot):
         if message.author.bot:
             return
             
-        # Check if channel is blacklisted
-        if self.is_blacklisted_channel(message.channel):
-            return
+        # Check for conversation timeout
+        await self.check_conversation_timeout(message.channel.id)
+        
+        # If this is a DM, always respond
+        if isinstance(message.channel, discord.DMChannel) or message.guild is None:
+            should_respond = True
+        else:
+            # Check if channel is blacklisted
+            if self.is_blacklisted_channel(message.channel):
+                return
+                
+            # Check if wake word mode is enabled
+            if self.wake_word_mode_enabled:
+                # Check if conversation is already active
+                if self.is_conversation_active(message.channel.id):
+                    should_respond = True
+                    # Update activity timestamp
+                    self.update_conversation_activity(message.channel.id)
+                else:
+                    # Check for wake word to start conversation
+                    should_respond = self.should_respond(message.content)
+                    if should_respond:
+                        # Activate conversation when wake word is detected
+                        self.activate_conversation(message.channel.id)
+            else:
+                # Fall back to original behavior
+                should_respond = self.should_respond(message.content)
+        
+        # If not explicitly mentioned, check for random response
+        if not should_respond and self.is_random_response_channel(message.channel):
+            # Roll a d10 (1-10) and check against the configured chance (default 10%)
+            random_chance = self.config.get('response.random_response_chance', 10)
+            if random.randint(1, 10) <= (random_chance / 10):
+                should_respond = True
+                self.logger.info(f"Random response triggered (rolled {random.randint(1, 10)} <= {random_chance/10})")
             
-        # Check for activation (name mention with fuzzy matching)
-        if not self.should_respond(message.content):
+        if not should_respond:
             return
             
         # Rate limiting check
@@ -144,7 +183,10 @@ class ScribbleBot(commands.Bot):
             await message.channel.send("*sowwy, I made an oopsie! Something went wrong... uwu*")
             
     def is_blacklisted_channel(self, channel):
-        """Check if channel is blacklisted"""
+        """Check if channel is blacklisted (always False for DMs)"""
+        import discord
+        if isinstance(channel, discord.DMChannel):
+            return False
         blacklist = self.data_manager.load_blacklist()
         return (
             channel.name in blacklist or 
@@ -152,10 +194,24 @@ class ScribbleBot(commands.Bot):
             any(word in channel.name.lower() for word in blacklist if not word.startswith('#'))
         )
         
+    def is_random_response_channel(self, channel):
+        """Check if random responses are enabled for this channel"""
+        # Use the same blacklist as regular messages
+        return not self.is_blacklisted_channel(channel)
+        
     def should_respond(self, content):
-        """Check if message should trigger a response using fuzzy matching"""
+        """Check if message should trigger a response using fuzzy matching or wake word"""
+        # Check if wake word mode is enabled
+        if self.wake_word_mode_enabled:
+            # Check for exact wake word match
+            if self.wake_word in content.lower():
+                self.logger.info(f"Wake word '{self.wake_word}' detected in message")
+                return True
+        
+        # Fall back to fuzzy name matching
         bot_name = self.config.get('character.name', 'Scribble').lower()
-        threshold = self.config.get('discord.activation_threshold', 0.85)
+        # Use the new config path for name matching threshold (0-100)
+        threshold = self.config.get('response.name_closeness_threshold', 85) / 100.0
         
         words = content.lower().split()
         for word in words:
@@ -163,6 +219,7 @@ class ScribbleBot(commands.Bot):
             clean_word = word.strip('.,!?;:"()[]{}')
             similarity = fuzz.ratio(clean_word, bot_name) / 100.0
             if similarity >= threshold:
+                self.logger.info(f"Matched name: {clean_word} with similarity {similarity*100:.1f}% >= {threshold*100}%")
                 return True
         return False
         
@@ -178,12 +235,62 @@ class ScribbleBot(commands.Bot):
         self.last_response[user_id] = now
         return True
         
+    async def check_conversation_timeout(self, channel_id):
+        """Check if conversation has timed out and deactivate if needed"""
+        if not self.wake_word_mode_enabled:
+            return
+            
+        if channel_id in self.active_conversations:
+            conversation = self.active_conversations[channel_id]
+            if conversation['active']:
+                now = datetime.now()
+                timeout_delta = timedelta(minutes=self.conversation_timeout)
+                
+                if now - conversation['last_activity'] > timeout_delta:
+                    conversation['active'] = False
+                    self.logger.info(f"Conversation timed out in channel {channel_id} after {self.conversation_timeout} minutes of inactivity")
+                    
+    def activate_conversation(self, channel_id):
+        """Activate conversation mode for a channel"""
+        if not self.wake_word_mode_enabled:
+            return
+            
+        now = datetime.now()
+        self.active_conversations[channel_id] = {
+            'last_activity': now,
+            'active': True
+        }
+        self.logger.info(f"Conversation activated in channel {channel_id}")
+        
+    def update_conversation_activity(self, channel_id):
+        """Update the last activity time for a conversation"""
+        if not self.wake_word_mode_enabled:
+            return
+            
+        if channel_id in self.active_conversations:
+            self.active_conversations[channel_id]['last_activity'] = datetime.now()
+        else:
+            # If conversation doesn't exist, create it
+            self.activate_conversation(channel_id)
+            
+    def is_conversation_active(self, channel_id):
+        """Check if conversation is currently active in a channel"""
+        if not self.wake_word_mode_enabled:
+            return False
+            
+        return channel_id in self.active_conversations and self.active_conversations[channel_id]['active']
+        
     async def process_message(self, message):
         """Process a message that should trigger a response"""
-        self.logger.info(f"Processing message from {message.author.name}: {message.content}")
+        channel_label = message.channel.name if hasattr(message.channel, 'name') else 'DM'
+        self.logger.info(f"=== Processing message from {message.author.name} in #{channel_label} ===")
+        self.logger.info(f"Message: {message.content}")
         
         # Collect context
         context = await self.collect_context(message)
+        
+        # Store context for debug commands
+        self._last_context = context
         
         # Update user dossier
         await self.update_user_dossier(context)
@@ -195,8 +302,11 @@ class ScribbleBot(commands.Bot):
             await message.channel.send("*confused scribble noises* uwu")
             return
             
-        # Log raw response for debugging
-        self.logger.info(f"Raw AI Response: {json.dumps(response, indent=2)}")
+        # Log full context and response for debugging
+        self.logger.info("=== FULL CONTEXT SENT TO AI ===")
+        self.logger.info(json.dumps(context, indent=2, default=str))
+        self.logger.info("=== RAW AI RESPONSE ===")
+        self.logger.info(json.dumps(response, indent=2, default=str))
         
         # Also print to terminal if enabled
         if self.config.get('debug.log_to_terminal', True):
@@ -243,7 +353,7 @@ class ScribbleBot(commands.Bot):
                 'name': msg.author.display_name,
                 'id': str(msg.author.id),
                 'message': msg.content,
-                'time': msg.created_at.strftime('%H:%M')
+                'time': msg.created_at.astimezone().strftime('%H:%M')
             })
             
         messages.reverse()  # Chronological order
@@ -269,7 +379,7 @@ class ScribbleBot(commands.Bot):
             'messages': messages,
             'memories': memories.get('memories', []),
             'dossier': dossier.get('users', {}),
-            'channel_name': message.channel.name,
+            'channel_name': message.channel.name if hasattr(message.channel, 'name') else 'DM',
             'guild_name': message.guild.name if message.guild else 'DM',
             'voice_channels': voice_channels
         }
@@ -289,8 +399,24 @@ class ScribbleBot(commands.Bot):
             updated_memories = await self.ai_handler.update_memories(context, response)
             if updated_memories:
                 self.data_manager.save_memories(updated_memories)
+            else:
+                # Fallback: keep existing memories if AI update fails
+                self.logger.warning("Memory update failed, keeping existing memories")
+                current_memories = self.data_manager.load_memories()
+                if current_memories and current_memories.get('memories'):
+                    # Just update the timestamp to show we tried
+                    current_memories['last_updated'] = datetime.now().isoformat()
+                    self.data_manager.save_memories(current_memories)
         except Exception as e:
             self.logger.error(f"Error updating memories: {e}")
+            # Fallback: keep existing memories
+            try:
+                current_memories = self.data_manager.load_memories()
+                if current_memories and current_memories.get('memories'):
+                    current_memories['last_updated'] = datetime.now().isoformat()
+                    self.data_manager.save_memories(current_memories)
+            except Exception as fallback_error:
+                self.logger.error(f"Fallback memory save also failed: {fallback_error}")
             
 
                 
@@ -318,7 +444,7 @@ class ScribbleBot(commands.Bot):
                 await ctx.send("*shakes head* Only admins can use debug commands, sowwy! uwu")
                 return
                 
-            current = self.config.get('debug.log_to_terminal', True)
+            current = self.config.get('debug.log_to_terminal', False)
             self.config.set('debug.log_to_terminal', not current)
             
             status = "enabled" if not current else "disabled"
@@ -332,7 +458,7 @@ class ScribbleBot(commands.Bot):
                 return
                 
             raw_output = self.config.get('debug.raw_output', False)
-            terminal_logging = self.config.get('debug.log_to_terminal', True)
+            terminal_logging = self.config.get('debug.log_to_terminal', False)
             
             embed = discord.Embed(
                 title="🔧 Scribble Debug Status",
@@ -342,9 +468,240 @@ class ScribbleBot(commands.Bot):
             embed.add_field(name="Raw Output", value="✅ Enabled" if raw_output else "❌ Disabled", inline=True)
             embed.add_field(name="Terminal Logging", value="✅ Enabled" if terminal_logging else "❌ Disabled", inline=True)
             
-            embed.set_footer(text="Commands: !scribble raw, terminal, status • uwu")
+            embed.set_footer(text="Commands: !scribble raw, terminal, status, show_prompt, memories • uwu")
             
             await ctx.send(embed=embed)
+
+        @self.command(name='memories')
+        async def show_memories(ctx):
+            """Show current memories (admin only)"""
+            if not self.is_admin(ctx.author):
+                await ctx.send("*shakes head* Only admins can see memories, sowwy! uwu")
+                return
+            
+            memories_data = self.data_manager.load_memories()
+            memories = memories_data.get('memories', [])
+            
+            if not memories:
+                await ctx.send("📝 **Memories:** No memories yet!")
+                return
+            
+            # Format memories for display
+            memory_text = "\n".join(f"• {memory}" for memory in memories[-10:])  # Show last 10
+            
+            embed = discord.Embed(
+                title="🧠 Scribble's Memories",
+                description=memory_text,
+                color=0x87CEEB
+            )
+            
+            embed.add_field(name="Total Memories", value=str(len(memories)), inline=True)
+            embed.add_field(name="Last Updated", value=memories_data.get('last_updated', 'Unknown'), inline=True)
+            
+            await ctx.send(embed=embed)
+
+        @self.command(name='test_memory')
+        async def test_memory_update(ctx):
+            """Test memory update function (admin only)"""
+            if not self.is_admin(ctx.author):
+                await ctx.send("*shakes head* Only admins can test memory updates, sowwy! uwu")
+                return
+            
+            if not hasattr(self, '_last_context'):
+                await ctx.send("❌ No recent message context available. Send a message first!")
+                return
+            
+            # Create a test response
+            test_response = {
+                "message": "This is a test response for memory update",
+                "action": "none"
+            }
+            
+            try:
+                await self.update_memories(self._last_context, test_response)
+                await ctx.send("✅ Memory update test completed! Check logs for details.")
+            except Exception as e:
+                await ctx.send(f"❌ Memory update test failed: {e}")
+
+        @self.command(name='fix_memories')
+        async def fix_memories(ctx):
+            """Fix and validate memory data (admin only)"""
+            if not self.is_admin(ctx.author):
+                await ctx.send("*shakes head* Only admins can fix memories, sowwy! uwu")
+                return
+            
+            try:
+                # Load and validate memories
+                memories_data = self.data_manager.load_memories()
+                validated_memories = self.data_manager.validate_memories(memories_data)
+                
+                # Clean up if needed
+                max_memories = self.config.get('character.max_memory_entries', 100)
+                if len(validated_memories['memories']) > max_memories:
+                    self.data_manager.cleanup_old_memories(max_memories)
+                    validated_memories = self.data_manager.load_memories()
+                
+                # Save the fixed memories
+                self.data_manager.save_memories(validated_memories)
+                
+                embed = discord.Embed(
+                    title="🔧 Memory Fix Results",
+                    color=0x87CEEB
+                )
+                
+                embed.add_field(name="Total Memories", value=str(len(validated_memories['memories'])), inline=True)
+                embed.add_field(name="Last Updated", value=validated_memories.get('last_updated', 'Unknown'), inline=True)
+                embed.add_field(name="Status", value="✅ Fixed and validated", inline=True)
+                
+                await ctx.send(embed=embed)
+                
+            except Exception as e:
+                await ctx.send(f"❌ Memory fix failed: {e}")
+
+        @self.command(name='clear_memories')
+        async def clear_memories(ctx):
+            """Clear all memories (admin only)"""
+            if not self.is_admin(ctx.author):
+                await ctx.send("*shakes head* Only admins can clear memories, sowwy! uwu")
+                return
+            
+            try:
+                # Create fresh memory data
+                fresh_memories = {
+                    "memories": [
+                        "I was just promoted to chancellor of Tiny Ninos! I'm so excited but also nervous about doing a good job.",
+                        "Everyone seems really nice here, I hope I can make lots of friends!",
+                        "I have these new powers but I'm not really sure how to use them properly... I hope someone can help me learn!"
+                    ],
+                    "last_updated": datetime.now().isoformat(),
+                    "total_entries": 3
+                }
+                
+                self.data_manager.save_memories(fresh_memories)
+                
+                embed = discord.Embed(
+                    title="🧹 Memories Cleared",
+                    description="All memories have been reset to default values.",
+                    color=0x87CEEB
+                )
+                
+                embed.add_field(name="New Memories", value=str(len(fresh_memories['memories'])), inline=True)
+                embed.add_field(name="Status", value="✅ Reset complete", inline=True)
+                
+                await ctx.send(embed=embed)
+                
+            except Exception as e:
+                await ctx.send(f"❌ Memory clear failed: {e}")
+
+        @self.command(name='show_prompt')
+        async def show_openai_prompt(ctx):
+            """Show what's being sent to OpenAI for the last message"""
+            if not self.is_admin(ctx.author):
+                await ctx.send("*shakes head* Only admins can use debug commands, sowwy! uwu")
+                return
+            
+            # Get the last message context
+            if not hasattr(self, '_last_context'):
+                await ctx.send("❌ No recent message context available. Send a message first!")
+                return
+            
+            context = self._last_context
+            
+            # Format the prompt like it's sent to OpenAI
+            messages_text = self.ai_handler.format_messages(context['messages'])
+            memories_text = self.ai_handler.format_memories(context['memories'])
+            dossier_text = self.ai_handler.format_dossier(context['dossier'], context['messages'])
+            voice_channels_text = ", ".join(context.get('voice_channels', [])) if context.get('voice_channels') else "None available"
+            
+            system_prompt = self.ai_handler.main_template.format(
+                character_prompt=self.ai_handler.character_prompt,
+                guild_name=context['guild_name'],
+                channel_name=context['channel_name'],
+                voice_channels_text=voice_channels_text,
+                memories_text=memories_text,
+                dossier_text=dossier_text,
+                messages_text=messages_text
+            )
+            
+            # Create the full prompt that gets sent to OpenAI
+            full_prompt = f"**System Message:**\n```\n{system_prompt}\n```\n\n**User Message:**\n```\nPlease respond to the recent messages as Scribble.\n```"
+            
+            # Split into chunks if too long
+            if len(full_prompt) > 1900:
+                chunks = [full_prompt[i:i+1900] for i in range(0, len(full_prompt), 1900)]
+                for i, chunk in enumerate(chunks):
+                    await ctx.send(f"**OpenAI Prompt (Part {i+1}/{len(chunks)}):**\n{chunk}")
+            else:
+                await ctx.send(f"**OpenAI Prompt:**\n{full_prompt}")
+
+        @self.command(name='wakeword')
+        async def show_wake_word_status(ctx):
+            """Show current wake word system status"""
+            if not self.is_admin(ctx.author):
+                await ctx.send("*shakes head* Only admins can see wake word status, sowwy! uwu")
+                return
+            
+            embed = discord.Embed(
+                title="🔔 Wake Word System Status",
+                color=0x87CEEB
+            )
+            
+            embed.add_field(name="Wake Word Mode", value="✅ Enabled" if self.wake_word_mode_enabled else "❌ Disabled", inline=True)
+            embed.add_field(name="Wake Word", value=f"`{self.wake_word}`", inline=True)
+            embed.add_field(name="Timeout", value=f"{self.conversation_timeout} minutes", inline=True)
+            
+            # Show active conversations
+            active_count = sum(1 for conv in self.active_conversations.values() if conv['active'])
+            embed.add_field(name="Active Conversations", value=str(active_count), inline=True)
+            
+            embed.set_footer(text="Commands: !scribble wakeword, wakeword_toggle, wakeword_set, timeout_set • uwu")
+            
+            await ctx.send(embed=embed)
+
+        @self.command(name='wakeword_toggle')
+        async def toggle_wake_word_mode(ctx):
+            """Toggle wake word mode on/off"""
+            if not self.is_admin(ctx.author):
+                await ctx.send("*shakes head* Only admins can toggle wake word mode, sowwy! uwu")
+                return
+            
+            self.wake_word_mode_enabled = not self.wake_word_mode_enabled
+            self.config.set('response.enable_wake_word_mode', self.wake_word_mode_enabled)
+            
+            status = "enabled" if self.wake_word_mode_enabled else "disabled"
+            await ctx.send(f"🔔 Wake word mode {status}! {'Users can now say the wake word to start conversations!' if self.wake_word_mode_enabled else 'Back to normal response mode!'} uwu")
+
+        @self.command(name='wakeword_set')
+        async def set_wake_word(ctx, *, new_wake_word):
+            """Set a new wake word"""
+            if not self.is_admin(ctx.author):
+                await ctx.send("*shakes head* Only admins can change the wake word, sowwy! uwu")
+                return
+            
+            if not new_wake_word or len(new_wake_word.strip()) == 0:
+                await ctx.send("❌ Please provide a valid wake word!")
+                return
+            
+            self.wake_word = new_wake_word.lower().strip()
+            self.config.set('response.wake_word', self.wake_word)
+            
+            await ctx.send(f"🔔 Wake word changed to `{self.wake_word}`! Users can now say this to start conversations! uwu")
+
+        @self.command(name='timeout_set')
+        async def set_conversation_timeout(ctx, minutes: int):
+            """Set conversation timeout in minutes"""
+            if not self.is_admin(ctx.author):
+                await ctx.send("*shakes head* Only admins can change the timeout, sowwy! uwu")
+                return
+            
+            if minutes < 1 or minutes > 1440:  # Between 1 minute and 24 hours
+                await ctx.send("❌ Timeout must be between 1 and 1440 minutes!")
+                return
+            
+            self.conversation_timeout = minutes
+            self.config.set('response.conversation_timeout_minutes', minutes)
+            
+            await ctx.send(f"⏰ Conversation timeout set to {minutes} minutes! Conversations will end after {minutes} minutes of inactivity! uwu")
             
     def is_admin(self, user):
         """Check if user is an admin"""

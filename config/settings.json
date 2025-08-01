@@ -1,6 +1,6 @@
 {
   "discord": {
-    "bot_token": "YOUR_DISCORD_BOT_TOKEN_HERE",
+    "bot_token": "YOUR_DISCORD_BOT_TOKEN_HERE", //setup an .env for better security, hardcoding is fine aswell (just not as secure)
     "guild_id": null,
     "activation_threshold": 0.85,
     "message_history_count": 20,
@@ -8,10 +8,10 @@
     "max_actions_per_hour": 10
   },
   "openai": {
-    "api_key": "YOUR_OPENAI_API_KEY_HERE",
-    "main_model": "gpt-4o",
-    "profiler_model": "gpt-3.5-turbo",
-    "memory_model": "gpt-3.5-turbo",
+    "api_key": "YOUR_OPENAI_API_KEY_HERE", //setup an .env for better security
+    "main_model": "gpt-4o", //scribble's main model
+    "profiler_model": "gpt-3.5-turbo", //scribble's profiler model (records user traits)
+    "memory_model": "gpt-3.5-turbo", //scribble's memory model (record long-term memory)
     "max_tokens": {
       "main": 500,
       "profiler": 200,
@@ -24,9 +24,19 @@
     }
   },
   "google_images": {
-    "api_key": "YOUR_GOOGLE_API_KEY_HERE",
-    "search_engine_id": "YOUR_SEARCH_ENGINE_ID_HERE",
-    "max_results": 10
+    "api_key": "YOUR_GOOGLE_API_KEY_HERE", //setup an .env for better security
+    "search_engine_id": "YOUR_SEARCH_ENGINE_ID_HERE", //setup an .env for better security
+    "max_results": 20,
+    "max_images_to_post": 3,
+    "safe_sites": [], // doesn't work atm - images are limited to public domain and safe-search enabled
+    "safe_search": "active"
+  },
+  "response": {
+    "name_closeness_threshold": 85, // 0-100, how close a word needs to be to 'scribble' to trigger a response
+    "random_response_chance": 10, // 1-100, percentage chance to respond to any message (in non-blacklisted channels) regardless of saying Scribble
+    "wake_word": "scribble", // The wake word to activate conversation mode
+    "conversation_timeout_minutes": 10, // Minutes of inactivity before conversation mode deactivates
+    "enable_wake_word_mode": true // Enable/disable wake word conversation mode
   },
   "character": {
     "name": "Scribble",
@@ -52,6 +62,6 @@
   },
   "debug": {
     "raw_output": false,
-    "log_to_terminal": true
+    "log_to_terminal": false
   }
 }

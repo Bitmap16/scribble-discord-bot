@@ -6,6 +6,10 @@ Manages interactions with OpenAI API for main responses, profiling, and memory u
 import openai
 import json
 import logging
+import os
+
+# Determine project root (parent of src directory)
+ROOT_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), os.pardir))
 from datetime import datetime
 import os
 from typing import Dict, List, Optional
@@ -23,13 +27,32 @@ class AIHandler:
         else:
             self.client = openai.OpenAI(api_key=api_key)
             
+        # Directory with prompt templates
+        self.prompts_dir = os.path.join(ROOT_DIR, 'config', 'prompts')
+
         # Load character prompt
         self.character_prompt = self.load_character_prompt()
-        
+
+        # Load prompt templates
+        self.main_template = self.load_prompt_template('main_prompt.txt')
+        self.memory_template = self.load_prompt_template('memory_prompt.txt')
+        self.profiler_template = self.load_prompt_template('profiler_prompt.txt')
+            
+    def load_prompt_template(self, filename: str) -> str:
+        """Helper to load prompt template from config/prompts directory"""
+        path = os.path.join(self.prompts_dir, filename)
+        try:
+            with open(path, 'r', encoding='utf-8') as f:
+                return f.read()
+        except FileNotFoundError:
+            self.logger.error(f"Prompt template '{filename}' not found in {self.prompts_dir}!")
+            return ""
+
     def load_character_prompt(self) -> str:
         """Load character prompt from file"""
+        prompt_path = os.path.join(ROOT_DIR, 'config', 'prompt.txt')
         try:
-            with open('config/prompt.txt', 'r', encoding='utf-8') as f:
+            with open(prompt_path, 'r', encoding='utf-8') as f:
                 return f.read().strip()
         except FileNotFoundError:
             self.logger.error("Character prompt file not found!")
@@ -49,23 +72,15 @@ class AIHandler:
             # Build prompt
             voice_channels_text = ", ".join(context.get('voice_channels', [])) if context.get('voice_channels') else "None available"
         
-            system_prompt = f"""{self.character_prompt}
-
-CURRENT CONTEXT:
-Server: {context['guild_name']}
-Current Channel: #{context['channel_name']}
-Available Voice Channels: {voice_channels_text}
-
-MEMORIES:
-{memories_text}
-
-USER DOSSIER:
-{dossier_text}
-
-RECENT MESSAGES:
-{messages_text}
-
-Remember to respond as Scribble and format your response as JSON with 'message' and 'action' fields."""
+            system_prompt = self.main_template.format(
+                character_prompt=self.character_prompt,
+                guild_name=context['guild_name'],
+                channel_name=context['channel_name'],
+                voice_channels_text=voice_channels_text,
+                memories_text=memories_text,
+                dossier_text=dossier_text,
+                messages_text=messages_text
+            )
 
             response = self.client.chat.completions.create(
                 model=self.config.get('openai.main_model', 'gpt-4o'),
@@ -126,35 +141,10 @@ Remember to respond as Scribble and format your response as JSON with 'message' 
             # Build profiler prompt
             messages_text = self.format_messages(context['messages'])
             
-            system_prompt = f"""You are a profiler AI that analyzes Discord messages to create user profiles.
-
-Based on the recent messages, update the user dossier with relevant information about each user.
-Focus on:
-- Personality traits
-- Interests and hobbies
-- Communication style
-- Pronouns (if mentioned)
-- Relationships with other users
-- Any notable behaviors
-
-Keep profiles concise but informative. Only include information that can be reasonably inferred from the messages.
-
-RECENT MESSAGES:
-{messages_text}
-
-CURRENT DOSSIER:
-{json.dumps(current_dossier, indent=2)}
-
-Respond with a JSON object containing the updated dossier in the format:
-{{
-  "users": {{
-    "user_id": {{
-      "name": "display_name",
-      "profile": "updated profile text",
-      "last_seen": "timestamp"
-    }}
-  }}
-}}"""
+            system_prompt = self.profiler_template.format(
+                messages_text=messages_text,
+                current_dossier=json.dumps(current_dossier, indent=2)
+            )
 
             response = self.client.chat.completions.create(
                 model=self.config.get('openai.profiler_model', 'gpt-3.5-turbo'),
@@ -168,15 +158,42 @@ Respond with a JSON object containing the updated dossier in the format:
             
             content = response.choices[0].message.content.strip()
             
-            try:
-                updated_data = json.loads(content)
-                # Add timestamp
-                updated_data['last_updated'] = datetime.now().isoformat()
-                updated_data['total_users'] = len(updated_data.get('users', {}))
-                return updated_data
-            except json.JSONDecodeError:
+            def _extract_json(text:str):
+                try:
+                    return json.loads(text)
+                except json.JSONDecodeError:
+                    # Attempt to extract from ```json code blocks
+                    # ```json fenced block
+                    if '```json' in text and '```' in text:
+                        start = text.find('```json') + 7
+                        end = text.rfind('```')
+                        if start < end:
+                            segment = text[start:end].strip()
+                            try:
+                                return json.loads(segment)
+                            except json.JSONDecodeError:
+                                pass
+                    # generic ``` fenced block
+                    if '```' in text:
+                        start = text.find('```') + 3
+                        end = text.rfind('```')
+                        if start < end:
+                            segment = text[start:end].strip()
+                            try:
+                                return json.loads(segment)
+                            except json.JSONDecodeError:
+                                pass
+                    return None
+
+            updated_data = _extract_json(content)
+            if not updated_data:
                 self.logger.error("Failed to parse dossier update response")
                 return None
+
+            # Add timestamp metadata
+            updated_data['last_updated'] = datetime.now().astimezone().isoformat()
+            updated_data['total_users'] = len(updated_data.get('users', {}))
+            return updated_data
                 
         except Exception as e:
             self.logger.error(f"Error updating dossier: {e}")
@@ -191,35 +208,12 @@ Respond with a JSON object containing the updated dossier in the format:
             current_memories = context['memories']
             messages_text = self.format_messages(context['messages'][-5:])  # Last 5 messages
             
-            system_prompt = f"""You are Scribble's memory AI. You help Scribble remember important interactions and experiences.
-
-Based on the recent conversation and Scribble's response, update Scribble's memories.
-Write memories in first person from Scribble's perspective.
-Focus on:
-- Important interactions with users
-- Actions Scribble took and why
-- Things Scribble learned about users
-- Emotional moments or significant events
-- Mistakes Scribble made
-
-Keep memories incredibly short - like a sticky note. Stay in character. Limit to the most important additions.
-
-RECENT CONVERSATION:
-{messages_text}
-
-SCRIBBLE'S RESPONSE:
-Message: {response.get('message', '')}
-Action: {response.get('action', 'none')}
-
-CURRENT MEMORIES:
-{json.dumps(current_memories, indent=2)}
-
-Respond with a JSON object containing updated memories:
-{{
-  "memories": ["memory1", "memory2", ...]
-}}
-
-Only include the most relevant new memories (1-3 entries max per interaction),"""
+            system_prompt = self.memory_template.format(
+                messages_text=messages_text,
+                response_message=response.get('message', ''),
+                response_action=response.get('action', 'none'),
+                current_memories=json.dumps(current_memories, indent=2)
+            )
 
             ai_response = self.client.chat.completions.create(
                 model=self.config.get('openai.memory_model', 'gpt-3.5-turbo'),
@@ -233,25 +227,154 @@ Only include the most relevant new memories (1-3 entries max per interaction),""
             
             content = ai_response.choices[0].message.content.strip()
             
+            # Log the raw response for debugging
+            self.logger.debug(f"Memory AI raw response: {content}")
+            
+            # Try to extract JSON using the same logic as main response
+            memory_update = None
+            
+            # Clean up the content first - remove any leading/trailing whitespace
+            content = content.strip()
+            
             try:
+                # First try direct JSON parsing
                 memory_update = json.loads(content)
-                
-                # Use the AI's updated memories (it should return the complete list)
-                updated_memories = memory_update.get('memories', [])
-                
-                # Limit memory count as a safety measure
-                max_memories = self.config.get('character.max_memory_entries', 100)
-                if len(updated_memories) > max_memories:
-                    updated_memories = updated_memories[-max_memories:]
-                    
-                return {
-                    'memories': updated_memories,
-                    'last_updated': datetime.now().isoformat(),
-                    'total_entries': len(updated_memories)
-                }
             except json.JSONDecodeError:
-                self.logger.error("Failed to parse memory update response")
+                # Check if it's wrapped in markdown code blocks
+                if '```json' in content and '```' in content:
+                    # Extract JSON from code blocks
+                    start = content.find('```json') + 7
+                    end = content.rfind('```')
+                    if start < end:
+                        json_content = content[start:end].strip()
+                        try:
+                            memory_update = json.loads(json_content)
+                        except json.JSONDecodeError:
+                            pass
+                elif '```' in content:
+                    # Try generic code blocks
+                    start = content.find('```') + 3
+                    end = content.rfind('```')
+                    if start < end:
+                        json_content = content[start:end].strip()
+                        try:
+                            memory_update = json.loads(json_content)
+                        except json.JSONDecodeError:
+                            pass
+                
+                # If still can't parse, try to extract just the memories array
+                if not memory_update:
+                    try:
+                        # Look for a "memories" key in the text
+                        if '"memories"' in content:
+                            # Try to find the start of the memories array
+                            start = content.find('"memories"')
+                            if start != -1:
+                                # Find the opening bracket after "memories"
+                                bracket_start = content.find('[', start)
+                                if bracket_start != -1:
+                                    # Find the matching closing bracket
+                                    bracket_count = 0
+                                    bracket_end = bracket_start
+                                    for i, char in enumerate(content[bracket_start:], bracket_start):
+                                        if char == '[':
+                                            bracket_count += 1
+                                        elif char == ']':
+                                            bracket_count -= 1
+                                            if bracket_count == 0:
+                                                bracket_end = i + 1
+                                                break
+                                    
+                                    if bracket_end > bracket_start:
+                                        memories_array = content[bracket_start:bracket_end]
+                                        try:
+                                            memories_list = json.loads(memories_array)
+                                            memory_update = {"memories": memories_list}
+                                        except json.JSONDecodeError:
+                                            pass
+                    except Exception as e:
+                        self.logger.debug(f"Failed to extract memories array: {e}")
+                
+                # If still can't parse, try to extract the entire JSON object
+                if not memory_update:
+                    try:
+                        # Look for the start of a JSON object
+                        brace_start = content.find('{')
+                        if brace_start != -1:
+                            # Find the matching closing brace
+                            brace_count = 0
+                            brace_end = brace_start
+                            for i, char in enumerate(content[brace_start:], brace_start):
+                                if char == '{':
+                                    brace_count += 1
+                                elif char == '}':
+                                    brace_count -= 1
+                                    if brace_count == 0:
+                                        brace_end = i + 1
+                                        break
+                            
+                            if brace_end > brace_start:
+                                json_object = content[brace_start:brace_end]
+                                try:
+                                    memory_update = json.loads(json_object)
+                                except json.JSONDecodeError:
+                                    pass
+                    except Exception as e:
+                        self.logger.debug(f"Failed to extract JSON object: {e}")
+            
+            if not memory_update:
+                self.logger.error(f"Failed to parse memory update response. Raw content: {repr(content)}")
+                self.logger.error(f"Content length: {len(content)}")
+                self.logger.error(f"First 100 chars: {repr(content[:100])}")
+                self.logger.error(f"Last 100 chars: {repr(content[-100:])}")
+                
+                # Fallback: create a simple memory based on the response
+                try:
+                    response_message = response.get('message', '')
+                    if response_message:
+                        # Extract a simple memory from the response
+                        simple_memory = f"I responded to someone with: {response_message[:50]}..."
+                        if len(response_message) > 50:
+                            simple_memory += "..."
+                        
+                        # Add to existing memories
+                        current_memories = context['memories']
+                        updated_memories = current_memories + [simple_memory]
+                        
+                        # Limit memory count
+                        max_memories = self.config.get('character.max_memory_entries', 100)
+                        if len(updated_memories) > max_memories:
+                            updated_memories = updated_memories[-max_memories:]
+                        
+                        self.logger.info(f"Created fallback memory: {simple_memory}")
+                        return {
+                            'memories': updated_memories,
+                            'last_updated': datetime.now().isoformat(),
+                            'total_entries': len(updated_memories)
+                        }
+                except Exception as fallback_error:
+                    self.logger.error(f"Fallback memory creation also failed: {fallback_error}")
+                
                 return None
+            
+            # Use the AI's updated memories (it should return the complete list)
+            updated_memories = memory_update.get('memories', [])
+            
+            # Ensure we have a list
+            if not isinstance(updated_memories, list):
+                self.logger.error(f"Expected memories to be a list, got: {type(updated_memories)}")
+                return None
+            
+            # Limit memory count as a safety measure
+            max_memories = self.config.get('character.max_memory_entries', 100)
+            if len(updated_memories) > max_memories:
+                updated_memories = updated_memories[-max_memories:]
+                
+            return {
+                'memories': updated_memories,
+                'last_updated': datetime.now().isoformat(),
+                'total_entries': len(updated_memories)
+            }
                 
         except Exception as e:
             self.logger.error(f"Error updating memories: {e}")

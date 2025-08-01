@@ -6,23 +6,44 @@ Handles configuration management and data persistence
 import json
 import os
 import logging
+
+# Determine project root (parent of src directory)
+ROOT_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), os.pardir))
 from datetime import datetime
 from typing import Dict, List, Any, Optional
 
 class ConfigManager:
     """Manages bot configuration from settings.json"""
     
-    def __init__(self, config_path: str = 'config/settings.json'):
+    def __init__(self, config_path: str = os.path.join(ROOT_DIR, 'config', 'settings.json')):
         self.config_path = config_path
         self.config = {}
         self.logger = logging.getLogger('ConfigManager')
         self.load_config()
         
+    def _strip_comments(self, text: str) -> str:
+        """Remove // and /* */ comments from JSON text to allow quasi-JSON configs"""
+        import re
+        # remove /* ... */ multiline comments
+        text = re.sub(r"/\*.*?\*/", "", text, flags=re.DOTALL)
+        # remove // comments
+        stripped_lines = []
+        for line in text.splitlines():
+            line_no_inline = line.split("//", 1)[0]
+            stripped_lines.append(line_no_inline)
+        return "\n".join(stripped_lines)
+
     def load_config(self):
         """Load configuration from file"""
         try:
             with open(self.config_path, 'r', encoding='utf-8') as f:
-                self.config = json.load(f)
+                raw_text = f.read()
+            try:
+                self.config = json.loads(raw_text)
+            except json.JSONDecodeError:
+                # try stripping comments
+                cleaned = self._strip_comments(raw_text)
+                self.config = json.loads(cleaned)
             self.logger.info("Configuration loaded successfully")
         except FileNotFoundError:
             self.logger.error(f"Configuration file not found: {self.config_path}")
@@ -72,19 +93,21 @@ class DataManager:
     def __init__(self):
         self.logger = logging.getLogger('DataManager')
         
-        # File paths
-        self.memories_path = 'data/memories.json'
-        self.dossier_path = 'data/dossier.json'
-        self.blacklist_path = 'config/blacklist.txt'
+        # File paths (absolute paths based on project root)
+        self.memories_path = os.path.join(ROOT_DIR, 'data', 'memories.json')
+        self.dossier_path = os.path.join(ROOT_DIR, 'data', 'dossier.json')
+        self.blacklist_path = os.path.join(ROOT_DIR, 'config', 'blacklist.txt')
         
         # Ensure data directory exists
-        os.makedirs('data', exist_ok=True)
+        os.makedirs(os.path.join(ROOT_DIR, 'data'), exist_ok=True)
         
     def load_memories(self) -> Dict:
         """Load memories from file"""
         try:
             with open(self.memories_path, 'r', encoding='utf-8') as f:
-                return json.load(f)
+                memories_data = json.load(f)
+                # Validate the loaded data
+                return self.validate_memories(memories_data)
         except FileNotFoundError:
             self.logger.warning("Memories file not found, creating new one")
             default_memories = {
@@ -105,6 +128,8 @@ class DataManager:
     def save_memories(self, memories_data: Dict):
         """Save memories to file"""
         try:
+            # Validate the data before saving
+            memories_data = self.validate_memories(memories_data)
             memories_data['last_updated'] = datetime.now().isoformat()
             with open(self.memories_path, 'w', encoding='utf-8') as f:
                 json.dump(memories_data, f, indent=2, ensure_ascii=False)
@@ -202,14 +227,58 @@ class DataManager:
             
     def cleanup_old_memories(self, max_entries: int = 100):
         """Clean up old memories if there are too many"""
-        memories_data = self.load_memories()
-        memories = memories_data.get('memories', [])
-        
-        if len(memories) > max_entries:
-            # Keep the most recent memories
-            memories_data['memories'] = memories[-max_entries:]
-            self.save_memories(memories_data)
-            self.logger.info(f"Cleaned up memories, kept {max_entries} most recent entries")
+        try:
+            memories_data = self.load_memories()
+            memories = memories_data.get('memories', [])
+            
+            if len(memories) > max_entries:
+                # Keep the most recent memories
+                memories_data['memories'] = memories[-max_entries:]
+                memories_data['total_entries'] = len(memories_data['memories'])
+                self.save_memories(memories_data)
+                self.logger.info(f"Cleaned up memories, kept {max_entries} most recent entries")
+        except Exception as e:
+            self.logger.error(f"Error cleaning up memories: {e}")
+            
+    def validate_memories(self, memories_data: Dict) -> Dict:
+        """Validate and fix memory data structure"""
+        try:
+            if not isinstance(memories_data, dict):
+                self.logger.warning("Invalid memories data structure, creating new one")
+                return {
+                    "memories": [],
+                    "last_updated": datetime.now().isoformat(),
+                    "total_entries": 0
+                }
+            
+            memories = memories_data.get('memories', [])
+            if not isinstance(memories, list):
+                self.logger.warning("Invalid memories list, resetting to empty")
+                memories = []
+            
+            # Filter out invalid memory entries
+            valid_memories = []
+            for memory in memories:
+                if isinstance(memory, str) and memory.strip():
+                    valid_memories.append(memory.strip())
+                else:
+                    self.logger.debug(f"Removed invalid memory entry: {memory}")
+            
+            # Ensure we have required fields
+            if 'last_updated' not in memories_data:
+                memories_data['last_updated'] = datetime.now().isoformat()
+            
+            memories_data['memories'] = valid_memories
+            memories_data['total_entries'] = len(valid_memories)
+            
+            return memories_data
+        except Exception as e:
+            self.logger.error(f"Error validating memories: {e}")
+            return {
+                "memories": [],
+                "last_updated": datetime.now().isoformat(),
+                "total_entries": 0
+            }
             
     def get_user_profile(self, user_id: str) -> Optional[Dict]:
         """Get a specific user's profile from dossier"""

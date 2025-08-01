@@ -1,3 +1,5 @@
+#This is a bunch of AI slop, feel free to ignore...
+
 # 🐾 Scribble Discord Bot
 
 A naive, innocent furry Discord bot powered by AI that serves as the "chancellor" of your Discord server. Scribble uses multiple AI models to provide natural conversations, maintain user profiles, and perform various Discord actions.

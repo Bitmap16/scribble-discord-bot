@@ -21,22 +21,27 @@ Action: {response_action}
 CURRENT MEMORIES:
 {current_memories}
 
-IMPORTANT: Respond with ONLY a valid JSON object. Do not include any other text, markdown formatting, or code blocks.
+IMPORTANT: You must respond with ONLY a valid JSON object. Do not include any other text, markdown formatting, or code blocks.
 
 The response must be a valid JSON object in this exact format:
-{
+{{
   "memories": ["memory1", "memory2", "memory3"]
-}
+}}
 
-CRITICAL: 
+CRITICAL REQUIREMENTS: 
 - No extra text before or after the JSON
 - No markdown formatting
 - No code blocks
 - Just the raw JSON object
 - Each memory should be a short string
 - Keep the total response under 300 tokens
+- Use double quotes for JSON strings
+- Escape any quotes within memory text
+- Your memories should include your past memories in addition to your current ones
 
 Example valid response:
-{
+{{
   "memories": ["I helped Bob with a question and he seemed grateful", "Alice is always friendly when she talks to me"]
-}
+}}
+
+Remember: ONLY return the JSON object, nothing else.

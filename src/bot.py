@@ -378,6 +378,7 @@ class ScribbleBot(commands.Bot):
         return {
             'messages': messages,
             'memories': memories.get('memories', []),
+            'memories_data': memories,  # Pass the full memories data structure
             'dossier': dossier.get('users', {}),
             'channel_name': message.channel.name if hasattr(message.channel, 'name') else 'DM',
             'guild_name': message.guild.name if message.guild else 'DM',
@@ -396,8 +397,10 @@ class ScribbleBot(commands.Bot):
     async def update_memories(self, context, response):
         """Update memories using memory AI"""
         try:
+            self.logger.info("Starting memory update...")
             updated_memories = await self.ai_handler.update_memories(context, response)
             if updated_memories:
+                self.logger.info(f"Memory update successful, saving {len(updated_memories.get('memories', []))} memories")
                 self.data_manager.save_memories(updated_memories)
             else:
                 # Fallback: keep existing memories if AI update fails

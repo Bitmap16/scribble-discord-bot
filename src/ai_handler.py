@@ -202,17 +202,24 @@ class AIHandler:
     async def update_memories(self, context: Dict, response: Dict) -> Optional[Dict]:
         """Update memories using memory AI"""
         if not self.client:
+            self.logger.error("OpenAI client not available")
             return None
             
         try:
+            self.logger.info("Memory AI: Starting memory update")
+            self.logger.debug(f"Context keys: {list(context.keys())}")
+            self.logger.debug(f"Response: {response}")
             current_memories = context['memories']
             messages_text = self.format_messages(context['messages'][-5:])  # Last 5 messages
+            
+            # Format current memories properly for the prompt
+            current_memories_text = self.format_memories(current_memories)
             
             system_prompt = self.memory_template.format(
                 messages_text=messages_text,
                 response_message=response.get('message', ''),
                 response_action=response.get('action', 'none'),
-                current_memories=json.dumps(current_memories, indent=2)
+                current_memories=current_memories_text
             )
 
             ai_response = self.client.chat.completions.create(
@@ -230,19 +237,15 @@ class AIHandler:
             # Log the raw response for debugging
             self.logger.debug(f"Memory AI raw response: {content}")
             
-            # Try to extract JSON using the same logic as main response
+            # Simplified JSON parsing
             memory_update = None
-            
-            # Clean up the content first - remove any leading/trailing whitespace
-            content = content.strip()
             
             try:
                 # First try direct JSON parsing
                 memory_update = json.loads(content)
             except json.JSONDecodeError:
-                # Check if it's wrapped in markdown code blocks
+                # Try to extract from markdown code blocks
                 if '```json' in content and '```' in content:
-                    # Extract JSON from code blocks
                     start = content.find('```json') + 7
                     end = content.rfind('```')
                     if start < end:
@@ -252,7 +255,6 @@ class AIHandler:
                         except json.JSONDecodeError:
                             pass
                 elif '```' in content:
-                    # Try generic code blocks
                     start = content.find('```') + 3
                     end = content.rfind('```')
                     if start < end:
@@ -261,66 +263,6 @@ class AIHandler:
                             memory_update = json.loads(json_content)
                         except json.JSONDecodeError:
                             pass
-                
-                # If still can't parse, try to extract just the memories array
-                if not memory_update:
-                    try:
-                        # Look for a "memories" key in the text
-                        if '"memories"' in content:
-                            # Try to find the start of the memories array
-                            start = content.find('"memories"')
-                            if start != -1:
-                                # Find the opening bracket after "memories"
-                                bracket_start = content.find('[', start)
-                                if bracket_start != -1:
-                                    # Find the matching closing bracket
-                                    bracket_count = 0
-                                    bracket_end = bracket_start
-                                    for i, char in enumerate(content[bracket_start:], bracket_start):
-                                        if char == '[':
-                                            bracket_count += 1
-                                        elif char == ']':
-                                            bracket_count -= 1
-                                            if bracket_count == 0:
-                                                bracket_end = i + 1
-                                                break
-                                    
-                                    if bracket_end > bracket_start:
-                                        memories_array = content[bracket_start:bracket_end]
-                                        try:
-                                            memories_list = json.loads(memories_array)
-                                            memory_update = {"memories": memories_list}
-                                        except json.JSONDecodeError:
-                                            pass
-                    except Exception as e:
-                        self.logger.debug(f"Failed to extract memories array: {e}")
-                
-                # If still can't parse, try to extract the entire JSON object
-                if not memory_update:
-                    try:
-                        # Look for the start of a JSON object
-                        brace_start = content.find('{')
-                        if brace_start != -1:
-                            # Find the matching closing brace
-                            brace_count = 0
-                            brace_end = brace_start
-                            for i, char in enumerate(content[brace_start:], brace_start):
-                                if char == '{':
-                                    brace_count += 1
-                                elif char == '}':
-                                    brace_count -= 1
-                                    if brace_count == 0:
-                                        brace_end = i + 1
-                                        break
-                            
-                            if brace_end > brace_start:
-                                json_object = content[brace_start:brace_end]
-                                try:
-                                    memory_update = json.loads(json_object)
-                                except json.JSONDecodeError:
-                                    pass
-                    except Exception as e:
-                        self.logger.debug(f"Failed to extract JSON object: {e}")
             
             if not memory_update:
                 self.logger.error(f"Failed to parse memory update response. Raw content: {repr(content)}")
@@ -338,7 +280,6 @@ class AIHandler:
                             simple_memory += "..."
                         
                         # Add to existing memories
-                        current_memories = context['memories']
                         updated_memories = current_memories + [simple_memory]
                         
                         # Limit memory count
@@ -359,6 +300,9 @@ class AIHandler:
             
             # Use the AI's updated memories (it should return the complete list)
             updated_memories = memory_update.get('memories', [])
+            
+            self.logger.info(f"Successfully parsed memory update: {len(updated_memories)} memories")
+            self.logger.debug(f"Memory update structure: {memory_update}")
             
             # Ensure we have a list
             if not isinstance(updated_memories, list):

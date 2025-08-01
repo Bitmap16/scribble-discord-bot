@@ -3,15 +3,16 @@ Action Handler for Scribble Discord Bot
 Handles Discord actions like timeouts, bans, nicknames, DMs, voice channels, and image search
 """
 
-import discord
-import asyncio
-import logging
-import re
-from datetime import datetime, timedelta
-from typing import Optional
-import aiohttp
-import json
 import os
+import logging
+import asyncio
+import aiohttp
+import random
+import json
+from typing import Optional, Dict, Any
+from datetime import datetime, timedelta
+import discord
+from fuzzywuzzy import fuzz
 
 class ActionHandler:
     def __init__(self, bot, config):
@@ -304,11 +305,15 @@ class ActionHandler:
             self.logger.warning("Google Images API not configured")
             return None
             
+        # Add random 4-digit number to make results more diverse
+        random_suffix = random.randint(1000, 9999)
+        search_query = f"{query} {random_suffix}"
+            
         url = "https://www.googleapis.com/customsearch/v1"
         params = {
             'key': api_key,
             'cx': search_engine_id,
-            'q': query,
+            'q': search_query,
             'searchType': 'image',
             'num': self.config.get('google_images.max_results', 10),
             'safe': 'active'  # Must be either 'active' or 'off'

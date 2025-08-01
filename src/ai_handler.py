@@ -199,7 +199,7 @@ Focus on:
 - Emotional moments or significant events
 - Mistakes Scribble made
 
-Keep memories concise and in character. Limit to the most important additions.
+Keep memories incredibly short - like a sticky note. Stay in character. Limit to the most important additions.
 
 RECENT CONVERSATION:
 {messages_text}
@@ -216,7 +216,7 @@ Respond with a JSON object containing updated memories:
   "memories": ["memory1", "memory2", ...]
 }}
 
-Only include the most relevant new memories (1-3 entries max per interaction)."""
+Only include the most relevant new memories (1-3 entries max per interaction),"""
 
             ai_response = self.client.chat.completions.create(
                 model=self.config.get('openai.memory_model', 'gpt-3.5-turbo'),
@@ -233,18 +233,18 @@ Only include the most relevant new memories (1-3 entries max per interaction).""
             try:
                 memory_update = json.loads(content)
                 
-                # Combine with existing memories
-                all_memories = current_memories + memory_update.get('memories', [])
+                # Use the AI's updated memories (it should return the complete list)
+                updated_memories = memory_update.get('memories', [])
                 
-                # Limit memory count
+                # Limit memory count as a safety measure
                 max_memories = self.config.get('character.max_memory_entries', 100)
-                if len(all_memories) > max_memories:
-                    all_memories = all_memories[-max_memories:]
+                if len(updated_memories) > max_memories:
+                    updated_memories = updated_memories[-max_memories:]
                     
                 return {
-                    'memories': all_memories,
+                    'memories': updated_memories,
                     'last_updated': datetime.now().isoformat(),
-                    'total_entries': len(all_memories)
+                    'total_entries': len(updated_memories)
                 }
             except json.JSONDecodeError:
                 self.logger.error("Failed to parse memory update response")

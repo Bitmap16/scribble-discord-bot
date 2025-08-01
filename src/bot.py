@@ -260,12 +260,18 @@ class ScribbleBot(commands.Bot):
         memories = self.data_manager.load_memories()
         dossier = self.data_manager.load_dossier()
         
+        # Get voice channels if in a guild
+        voice_channels = []
+        if message.guild:
+            voice_channels = [vc.name for vc in message.guild.voice_channels]
+        
         return {
             'messages': messages,
             'memories': memories.get('memories', []),
             'dossier': dossier.get('users', {}),
             'channel_name': message.channel.name,
-            'guild_name': message.guild.name if message.guild else 'DM'
+            'guild_name': message.guild.name if message.guild else 'DM',
+            'voice_channels': voice_channels
         }
         
     async def update_user_dossier(self, context):

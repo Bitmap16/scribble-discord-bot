@@ -47,11 +47,14 @@ class AIHandler:
             dossier_text = self.format_dossier(context['dossier'], context['messages'])
             
             # Build prompt
+            voice_channels_text = ", ".join(context.get('voice_channels', [])) if context.get('voice_channels') else "None available"
+        
             system_prompt = f"""{self.character_prompt}
 
 CURRENT CONTEXT:
 Server: {context['guild_name']}
-Channel: #{context['channel_name']}
+Current Channel: #{context['channel_name']}
+Available Voice Channels: {voice_channels_text}
 
 MEMORIES:
 {memories_text}

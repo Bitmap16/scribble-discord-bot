@@ -262,11 +262,15 @@ class ActionHandler:
             voice_client = await voice_channel.connect()
             await channel.send(f"*excitedly* I joined {voice_channel.name}! I'll stay for {minutes} minutes! uwu")
             
-            # Auto-disconnect after specified time
-            await asyncio.sleep(minutes * 60)
-            if voice_client.is_connected():
-                await voice_client.disconnect()
-                await channel.send("*waves* Time's up! Leaving the voice channel now! uwu")
+            # Create background task for auto-disconnect
+            async def auto_disconnect():
+                await asyncio.sleep(minutes * 60)
+                if voice_client.is_connected():
+                    await voice_client.disconnect()
+                    await channel.send("*waves* Time's up! Leaving the voice channel now! uwu")
+            
+            # Start the background task without blocking
+            asyncio.create_task(auto_disconnect())
                 
         except discord.ClientException:
             await channel.send("*confused* I'm already connected to a voice channel... uwu")

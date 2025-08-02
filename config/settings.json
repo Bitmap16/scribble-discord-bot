@@ -26,8 +26,8 @@
   "google_images": {
     "api_key": "YOUR_GOOGLE_API_KEY_HERE", //setup an .env for better security
     "search_engine_id": "YOUR_SEARCH_ENGINE_ID_HERE", //setup an .env for better security
-    "max_results": 20,
-    "max_images_to_post": 3,
+    "max_results": 10,
+    "max_images_to_post": 5,
     "safe_sites": [], // doesn't work atm - images are limited to public domain and safe-search enabled
     "safe_search": "active"
   },
@@ -63,5 +63,17 @@
   "debug": {
     "raw_output": false,
     "log_to_terminal": false
+  },
+  "voice": {
+    "enabled": true, // Enable/disable voice functionality
+    "random_sound_chance": 100, // 0-100, percentage chance to play another sound after each one
+    "min_interval_seconds": 30, // Minimum seconds between sounds
+    "max_interval_seconds": 120, // Maximum seconds between sounds
+    "disconnect_chance": 15, // 0-100, percentage chance to disconnect after each sound
+    "volume": 0.3, // Volume level (0.0 to 1.0)
+    "supported_formats": [".mp3", ".ogg"], // Supported audio file formats
+    "disconnect_delay_seconds": 1, // Seconds to wait before disconnecting
+    "image_post_delay_seconds": 0.5, // Seconds between posting multiple images
+    "connection_timeout_seconds": 20.0 // Timeout for voice connection attempts
   }
 }

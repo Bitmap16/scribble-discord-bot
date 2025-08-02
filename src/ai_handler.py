@@ -121,11 +121,13 @@ class AIHandler:
     async def update_dossier(self, context: Dict) -> Optional[Dict]:
         """Update user dossier using profiler AI"""
         if not self.client:
+            self.logger.warning("OpenAI client not available for dossier update")
             return None
             
         try:
             # Get current dossier
             current_dossier = context['dossier']
+            self.logger.info(f"Current dossier has {len(current_dossier)} users")
             
             # Extract users from recent messages
             users_in_messages = {}
@@ -138,6 +140,8 @@ class AIHandler:
                     }
                 users_in_messages[user_id]['messages'].append(msg['message'])
                 
+            self.logger.info(f"Found {len(users_in_messages)} users in recent messages")
+            
             # Build profiler prompt
             messages_text = self.format_messages(context['messages'])
             
@@ -146,6 +150,7 @@ class AIHandler:
                 current_dossier=json.dumps(current_dossier, indent=2)
             )
 
+            self.logger.info("Sending dossier update request to OpenAI")
             response = self.client.chat.completions.create(
                 model=self.config.get('openai.profiler_model', 'gpt-3.5-turbo'),
                 messages=[
@@ -157,6 +162,7 @@ class AIHandler:
             )
             
             content = response.choices[0].message.content.strip()
+            self.logger.info(f"Received dossier update response: {content[:100]}...")
             
             def _extract_json(text:str):
                 try:
@@ -188,8 +194,11 @@ class AIHandler:
             updated_data = _extract_json(content)
             if not updated_data:
                 self.logger.error("Failed to parse dossier update response")
+                self.logger.error(f"Raw response content: {content}")
                 return None
 
+            self.logger.info(f"Successfully parsed dossier update with {len(updated_data.get('users', {}))} users")
+            
             # Add timestamp metadata
             updated_data['last_updated'] = datetime.now().astimezone().isoformat()
             updated_data['total_users'] = len(updated_data.get('users', {}))

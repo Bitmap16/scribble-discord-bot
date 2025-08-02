@@ -17,6 +17,7 @@ from dotenv import load_dotenv
 
 from ai_handler import AIHandler
 from actions import ActionHandler
+from sound_manager import SoundManager
 from utils import ConfigManager, DataManager
 
 # Load environment variables
@@ -47,6 +48,7 @@ class ScribbleBot(commands.Bot):
         # Initialize handlers
         self.ai_handler = AIHandler(self.config)
         self.action_handler = ActionHandler(self, self.config)
+        self.sound_manager = SoundManager(self.config)
         
         # Rate limiting
         self.last_response = {}
@@ -303,17 +305,14 @@ class ScribbleBot(commands.Bot):
             return
             
         # Log full context and response for debugging
-        self.logger.info("=== FULL CONTEXT SENT TO AI ===")
-        self.logger.info(json.dumps(context, indent=2, default=str))
-        self.logger.info("=== RAW AI RESPONSE ===")
-        self.logger.info(json.dumps(response, indent=2, default=str))
-        
-        # Also print to terminal if enabled
+        # Log the message being responded to
+        self.logger.info(f"Responding to: {message.author.display_name}: {message.content}")
+        # Print clean response to terminal if enabled
         if self.config.get('debug.log_to_terminal', True):
-            print(f"\n🤖 RAW AI RESPONSE:")
+            print(f"\n🤖 Scribble's Response:")
             print(f"📝 Message: {response.get('message', 'None')}")
-            print(f"⚡ Action: {response.get('action', 'none')}")
-            print(f"📋 Full JSON: {json.dumps(response, indent=2)}")
+            if response.get('action') and response['action'] != 'none':
+                print(f"⚡ Action: {response.get('action', 'none')}")
             print("-" * 50)
         
         # Send message response (raw JSON or plain text)
@@ -388,11 +387,17 @@ class ScribbleBot(commands.Bot):
     async def update_user_dossier(self, context):
         """Update user dossier using profiler AI"""
         try:
+            self.logger.info("Starting dossier update...")
             updated_dossier = await self.ai_handler.update_dossier(context)
             if updated_dossier:
+                self.logger.info(f"Dossier update successful, saving {len(updated_dossier.get('users', {}))} users")
                 self.data_manager.save_dossier(updated_dossier)
+            else:
+                self.logger.warning("Dossier update returned None, keeping existing dossier")
         except Exception as e:
             self.logger.error(f"Error updating dossier: {e}")
+            import traceback
+            self.logger.error(f"Traceback: {traceback.format_exc()}")
             
     async def update_memories(self, context, response):
         """Update memories using memory AI"""
@@ -705,6 +710,145 @@ class ScribbleBot(commands.Bot):
             self.config.set('response.conversation_timeout_minutes', minutes)
             
             await ctx.send(f"⏰ Conversation timeout set to {minutes} minutes! Conversations will end after {minutes} minutes of inactivity! uwu")
+
+        @self.command(name='sounds')
+        async def show_sound_status(ctx):
+            """Show current sound system status"""
+            if not self.is_admin(ctx.author):
+                await ctx.send("*shakes head* Only admins can see sound status, sowwy! uwu")
+                return
+            
+            embed = discord.Embed(
+                title="🔊 Sound System Status",
+                color=0x87CEEB
+            )
+            
+            embed.add_field(name="Sound System", value="✅ Enabled" if self.sound_manager.enabled else "❌ Disabled", inline=True)
+            embed.add_field(name="Available Sounds", value=str(len(self.sound_manager.available_sounds)), inline=True)
+            embed.add_field(name="Sound Interval", value=f"{self.sound_manager.sound_interval_min}-{self.sound_manager.sound_interval_max}s", inline=True)
+            
+            # Show active voice connections
+            active_connections = sum(1 for guild_id in self.sound_manager.active_voice_clients.keys())
+            embed.add_field(name="Active Voice Connections", value=str(active_connections), inline=True)
+            
+            # List available sounds
+            if self.sound_manager.available_sounds:
+                sound_list = ", ".join(self.sound_manager.get_available_sounds()[:5])  # Show first 5
+                if len(self.sound_manager.available_sounds) > 5:
+                    sound_list += f" and {len(self.sound_manager.available_sounds) - 5} more..."
+                embed.add_field(name="Available Sounds", value=sound_list, inline=False)
+            else:
+                embed.add_field(name="Available Sounds", value="No sound files found in sounds/ directory", inline=False)
+            
+            embed.set_footer(text="Commands: !scribble sounds, sounds_toggle, sounds_reload • uwu")
+            
+            await ctx.send(embed=embed)
+
+        @self.command(name='sounds_toggle')
+        async def toggle_sound_system(ctx):
+            """Toggle sound system on/off"""
+            if not self.is_admin(ctx.author):
+                await ctx.send("*shakes head* Only admins can toggle sound system, sowwy! uwu")
+                return
+            
+            self.sound_manager.enabled = not self.sound_manager.enabled
+            self.config.set('sounds.enabled', self.sound_manager.enabled)
+            
+            status = "enabled" if self.sound_manager.enabled else "disabled"
+            await ctx.send(f"🔊 Sound system {status}! {'Scribble will now make cute sounds in voice channels!' if self.sound_manager.enabled else 'Sound system is now disabled!'} uwu")
+
+        @self.command(name='sounds_reload')
+        async def reload_sounds(ctx):
+            """Reload sound files from the sounds directory"""
+            if not self.is_admin(ctx.author):
+                await ctx.send("*shakes head* Only admins can reload sounds, sowwy! uwu")
+                return
+            
+            old_count = len(self.sound_manager.available_sounds)
+            self.sound_manager.reload_sounds()
+            new_count = len(self.sound_manager.available_sounds)
+            
+            await ctx.send(f"🔊 Reloaded sounds! Found {new_count} sound files (was {old_count})! uwu")
+
+        @self.command(name='test_dossier')
+        async def test_dossier_update(ctx):
+            """Test the dossier update system"""
+            if not self.is_admin(ctx.author):
+                await ctx.send("*shakes head* Only admins can test dossier updates, sowwy! uwu")
+                return
+            
+            try:
+                # Create a test context
+                test_context = {
+                    'messages': [
+                        {
+                            'name': ctx.author.display_name,
+                            'id': str(ctx.author.id),
+                            'message': 'This is a test message to update my dossier!',
+                            'time': datetime.now().strftime('%H:%M')
+                        }
+                    ],
+                    'dossier': self.data_manager.load_dossier().get('users', {})
+                }
+                
+                await ctx.send("🔄 Testing dossier update system...")
+                
+                # Test the dossier update
+                updated_dossier = await self.ai_handler.update_dossier(test_context)
+                
+                if updated_dossier:
+                    await ctx.send(f"✅ Dossier update successful! Updated {len(updated_dossier.get('users', {}))} users")
+                    # Save the updated dossier
+                    self.data_manager.save_dossier(updated_dossier)
+                else:
+                    await ctx.send("❌ Dossier update failed - check logs for details")
+                    
+            except Exception as e:
+                await ctx.send(f"❌ Error testing dossier: {e}")
+                self.logger.error(f"Error in test_dossier_update: {e}")
+
+        @self.command(name='show_dossier')
+        async def show_dossier(ctx):
+            """Show the current user dossier"""
+            if not self.is_admin(ctx.author):
+                await ctx.send("*shakes head* Only admins can see the dossier, sowwy! uwu")
+                return
+            
+            try:
+                dossier = self.data_manager.load_dossier()
+                users = dossier.get('users', {})
+                
+                if not users:
+                    await ctx.send("📋 No users in dossier yet!")
+                    return
+                
+                embed = discord.Embed(
+                    title="📋 User Dossier",
+                    color=0x87CEEB
+                )
+                
+                for user_id, user_data in users.items():
+                    name = user_data.get('name', 'Unknown')
+                    profile = user_data.get('profile', 'No profile')
+                    last_seen = user_data.get('last_seen', 'Unknown')
+                    
+                    # Truncate profile if too long
+                    if len(profile) > 200:
+                        profile = profile[:200] + "..."
+                    
+                    embed.add_field(
+                        name=f"👤 {name}",
+                        value=f"**Profile:** {profile}\n**Last Seen:** {last_seen}",
+                        inline=False
+                    )
+                
+                embed.set_footer(text=f"Total Users: {len(users)} • Last Updated: {dossier.get('last_updated', 'Unknown')}")
+                
+                await ctx.send(embed=embed)
+                
+            except Exception as e:
+                await ctx.send(f"❌ Error showing dossier: {e}")
+                self.logger.error(f"Error in show_dossier: {e}")
             
     def is_admin(self, user):
         """Check if user is an admin"""

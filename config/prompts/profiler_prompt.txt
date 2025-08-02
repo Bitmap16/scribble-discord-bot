@@ -30,6 +30,8 @@ The response must be a valid JSON object in this exact format:
   }}
 }}
 
+If no new information is found, return the current dossier unchanged. If new users are found, add them to the dossier.
+
 Example valid response:
 {{
   "users": {{

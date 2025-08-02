@@ -40,7 +40,12 @@ cp .env.example .env
 
 ### 3. Configuration
 
-1. **Edit `.env` file** with your API keys:
+1. **Set up OAuth2 Scopes** (IMPORTANT for voice functionality):
+   - See `OAUTH2_SETUP.md` for complete instructions
+   - You need `bot` AND `applications.commands` scopes
+   - Required permissions: Connect, Speak, Send Messages, Read Message History
+
+2. **Edit `.env` file** with your API keys:
 ```env
 DISCORD_BOT_TOKEN=your_discord_bot_token_here
 OPENAI_API_KEY=your_openai_api_key_here
